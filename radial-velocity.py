@@ -10,13 +10,11 @@ import pygame.freetype
 #
 
 R = 5.2 # Distancia entre el Sol y el planeta en unidades astronomicas
-        # La ventana tiene 600 pixeles en total
-MASS_RATIO = 0.001 # = M_planeta / M_estrella. La estrella más pequeña posible 
-                   # tiene 0.08 veces la masa 
-                   # del sol. La fusion nuclear no ocurre en objetos de masas 
-                   # menores.
-
-T = 5   # Periodo de la orbita en segundos reales
+MASS_RATIO = 0.001 # = M_planeta / M_estrella. Por ejemplo:
+                   # M_jupiter /  M_sol = 0.0009545942
+                   # Notar que la estrella más pequeña posible tiene 0.08 veces
+                   # la masa del sol. La fusion nuclear no ocurre en objetos de
+                   # masas menores.
 
 ################################################################################
 # Problem Constants
@@ -28,12 +26,16 @@ CX, CY = (300, 300)
 BACKGROUND_COLOR = (0, 0, 0)
 MAJOR_GRID_COLOR = (50, 50, 50)
 PIXEL_SCALE = 200 / 5.2 # 5.2 u.a. son 200 pixeles
+TIME_SCALE = 5 / 11.8622 # 5 segundos del programa son 11.8622 años terrestres
 
 BODIES = {'sun' : pygame.image.load('assets/images/sun51x51.png'),
           'jupiter' : pygame.image.load('assets/images/jupiter35x35.png'),
           }
 
-GMsun = 4 * np.pi**2 * R**3 / T**2
+G = 39.47692640889762 # [ua^3 / Msun / yr^2]
+Msun = 1.
+Mp = Msun * MASS_RATIO
+
 ################################################################################
 
 
@@ -93,22 +95,46 @@ class PlanetarySystem(object):
     modo que las órbitas sean perfectamente circulares.
     """
 
-    def __init__(self, a=5.2, mass_ratio=0.001):
+    def __init__(self, d=5.2, mass_ratio=0.001):
         """
-        a : [float] Eje semi mayor de la orbita en unidades astronomicas.
+        d : [float] Distancia entre el planeta y la estrella.
         mass_ratio : [float] la razon entre la masa del planeta y la de la
                      estrella.
         """
-        self.a = a
+        self.d = d
         self.mass_ratio = mass_ratio
         self.set_initial_positions()
         self.set_initial_velocities()
+        self.acceleration()
 
     def set_initial_positions(self):
         self.y = np.array([0., 0.])
-        x_sun = - self.a * self.mass_ratio / (1 + self.mass_ratio)
-        x_planet = self.a / (1 + self.mass_ratio)
+        x_sun = -self.d * self.mass_ratio / (1 + self.mass_ratio)
+        x_planet = self.d / (1 + self.mass_ratio)
         self.x = np.array([x_sun, x_planet])
+
+    def set_initial_velocities(self):
+        self.vx = np.array([0., 0.])
+        self.vy = np.array([np.sqrt(-G * Mp * self.x[0] / self.d**2), 
+                            -np.sqrt(G * Msun * self.x[1] / self.d**2)])
+
+    def acceleration(self):
+        dist = np.sqrt((self.x[1] - self.x[0])**2 + (self.y[1] - self.y[0])**2)
+        fx = G * Msun * Mp * (self.x[1] - self.x[0]) / dist**3
+        self.ax = np.array([1/Msun, -1/Mp]) * fx
+        fy = G * Msun * Mp * (self.y[1] - self.y[0]) / dist**3
+        self.ay = np.array([1/Msun, -1/Mp]) * fy
+
+    def step_forward(self, dt):
+        self.x = self.x + self.vx * dt + 0.5 * self.ax * dt**2
+        self.y = self.y + self.vy * dt + 0.5 * self.ay * dt**2
+
+        old_ax = self.ax.copy()
+        old_ay = self.ay.copy()
+        self.acceleration()
+
+        self.vx = self.vx + 0.5 * (self.ax + old_ax) * dt
+        self.vy = self.vy + 0.5 * (self.ay + old_ay) * dt
 
     def geom_transform(self):
         stamp_sizes = np.array([25, 17])
@@ -127,7 +153,7 @@ class PlanetarySystem(object):
 
 ###############################################################################
 setup_and_start()
-ps = PlanetarySystem(a=5.2, mass_ratio=MASS_RATIO)
+ps = PlanetarySystem(d=R, mass_ratio=MASS_RATIO)
 
 
 while RUNNING:
@@ -149,11 +175,16 @@ while RUNNING:
                 sys.exit()
 
     draw_background()
-    ps.draw()
 
     if PAUSED:
         GAME_FONT.render_to(SCREEN, (25, 570), "En pausa...", 
                             (255, 255, 255))
+    else:
+        dt = dt / 1000. / TIME_SCALE
+        ps.step_forward(dt)
+        print("Vsun,x = {:-.5f} [km/s]".format(ps.vx[0]*4.740))
+
+    ps.draw()
 
     pygame.display.flip()
 
