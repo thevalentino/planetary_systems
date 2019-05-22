@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+from scipy.optimize import newton
 import pygame
 import pygame.freetype
 
@@ -9,8 +10,8 @@ import pygame.freetype
 # ============================================================
 #
 
-# MASS_RATIO = 3e-6
-MASS_RATIO = 0.5
+MASS_RATIO = 0.01
+# MASS_RATIO = 3e-6 # Este es el valor correcto para la Tierra
 
 ################################################################################
 # Problem Constants
@@ -100,11 +101,29 @@ class SunPlusEarth(object):
         self.theta = 0
         self.x = np.array([0., 1.]) # [sun, earth]
         self.y = np.array([0., 0.])
+        self.vx = np.array([0., 0.])
+        self.vy = np.array([0., -2 * np.pi])
+        self.acceleration()
+
+    def acceleration(self):
+        d = np.sqrt((self.x[1] - self.x[0])**2 + (self.y[1] - self.y[0])**2)
+        self.ax = -G * Msun * (self.x[1] - self.x[0]) / d**3
+        self.ay = -G * Msun * (self.y[1] - self.y[0]) / d**3
 
     def step_forward(self, dt):
-        self.theta -= 2 * np.pi / 1. * dt
-        self.x[1] = self.R * np.cos(self.theta)
-        self.y[1] = self.R * np.sin(self.theta)
+        # self.theta -= 2 * np.pi / 1. * dt
+        # self.x[1] = self.R * np.cos(self.theta)
+        # self.y[1] = self.R * np.sin(self.theta)
+
+        self.x[1] = self.x[1] + self.vx[1] * dt + 0.5 * self.ax * dt**2
+        self.y[1] = self.y[1] + self.vy[1] * dt + 0.5 * self.ay * dt**2
+
+        old_ax = self.ax.copy()
+        old_ay = self.ay.copy()
+        self.acceleration()
+
+        self.vx[1] = self.vx[1] + 0.5 * (self.ax + old_ax) * dt
+        self.vy[1] = self.vy[1] + 0.5 * (self.ay + old_ay) * dt
 
     def geom_transform(self):
         stamp_sizes = np.array([25, 10])
@@ -143,10 +162,10 @@ class MasslessProbes(object):
                               (self.y - sun_earth.y[0])**2)
         dist_to_earth = np.sqrt((self.x - sun_earth.x[1])**2 + 
                                 (self.y - sun_earth.y[1])**2)
-        self.ax = (-G * Msun * (self.x - sun_earth.x[0]) / dist_to_sun
-                   - G * Mp * (self.x - sun_earth.x[1]) / dist_to_earth)
-        self.ay = (-G * Msun * (self.y - sun_earth.y[0]) / dist_to_sun
-                   - G * Mp * (self.y - sun_earth.y[1]) / dist_to_earth)
+        self.ax = (-G * Msun * (self.x - sun_earth.x[0]) / dist_to_sun**3
+                   - G * Mp * (self.x - sun_earth.x[1]) / dist_to_earth**3)
+        self.ay = (-G * Msun * (self.y - sun_earth.y[0]) / dist_to_sun**3
+                   - G * Mp * (self.y - sun_earth.y[1]) / dist_to_earth**3)
 
     def step_forward(self, dt):
         self.x = self.x + self.vx * dt + 0.5 * self.ax * dt**2
@@ -192,11 +211,46 @@ class MasslessProbes(object):
         output.initial_velocities()
         return output
 
+    @classmethod
+    def populating_lagrange_points(cls, color=PROBES_COLOR, size=5, width=1):
+        R = 1.
+        def l1(r, R=1., mass_ratio=MASS_RATIO):
+            output = mass_ratio * (R-r)**2 + (R-r)**3/R**3 * r**2- r**2
+            return output
+
+        def l2(r, R=1., mass_ratio=MASS_RATIO):
+            output = r**2 + mass_ratio * (R+r)**2 - (R+r)**3/R**3 * r**2
+            return output
+
+        def l3(r, R=1., mass_ratio=MASS_RATIO):
+            output = (R+r)**2 + mass_ratio * r**2 - r**3/R**3*(R+r)**2
+            return output
+
+        l1_x = newton(l1, 0)
+        l2_x = newton(l2, 0.5)
+        l3_x = -newton(l3, 1)
+
+        x = np.array([R-l1_x, R+l2_x, l3_x])
+        y = np.zeros(3)
+        vx = np.zeros(3)
+
+        w = -2 * np.pi / 1.
+        vy = np.ones(3) * w * x
+
+        output = cls(x, y, vx, vy, color=color, size=size,
+                     width=width)
+        return output
+
+
 ###############################################################################
 setup_and_start()
 sun_earth = SunPlusEarth(mass_ratio=MASS_RATIO)
 probes = MasslessProbes.with_random_positions(100, color=PROBES_COLOR,
                                               size=5, width=1)
+lagrange = MasslessProbes.populating_lagrange_points(color=(125, 0, 0),
+                                                     size=7, width=2)
+
+objetos = [sun_earth, probes, lagrange]
 
 while RUNNING:
     dt = CLOCK.tick(26)
@@ -223,11 +277,11 @@ while RUNNING:
                             (255, 255, 255))
     else:
         dt = dt / 1000. / TIME_SCALE
-        sun_earth.step_forward(dt)
-        probes.step_forward(dt)
+        for objeto in objetos:
+            objeto.step_forward(dt)
 
-    sun_earth.draw()
-    probes.draw()
+    for objeto in objetos:
+        objeto.draw()
 
     pygame.display.flip()
 
